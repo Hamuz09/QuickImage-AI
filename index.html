@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Studio Nano Banana - Dark Mode</title>
+    <title>Studio Nano Banana - Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -20,11 +20,12 @@
             animation: rotation 1s linear infinite;
         }
         @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 10px; }
         .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .slide-in { animation: slideIn 0.3s ease-out; }
     </style>
 </head>
 <body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans min-h-screen transition-colors duration-300">
@@ -39,36 +40,100 @@
             const [generatedImage, setGeneratedImage] = useState(null);
             const [history, setHistory] = useState([]);
             const [error, setError] = useState(null);
+            const [darkMode, setDarkMode] = useState(false);
 
-            const apiKey = "AIzaSyBc9J9aL3qDQsmz36mYG-XUv40h9-7SWHg"; 
+            // Carica cronologia da localStorage
+            useEffect(() => {
+                const saved = localStorage.getItem('nanobanana_history');
+                if (saved) setHistory(JSON.parse(saved));
+                
+                const savedTheme = localStorage.getItem('nanobanana_theme');
+                if (savedTheme === 'dark') {
+                    setDarkMode(true);
+                    document.documentElement.classList.add('dark');
+                }
+            }, []);
+
+            // Salva cronologia
+            useEffect(() => {
+                if (history.length > 0) {
+                    localStorage.setItem('nanobanana_history', JSON.stringify(history.slice(0, 20))); // max 20
+                }
+            }, [history]);
+
+            const toggleDarkMode = () => {
+                setDarkMode(!darkMode);
+                document.documentElement.classList.toggle('dark');
+                localStorage.setItem('nanobanana_theme', !darkMode ? 'dark' : 'light');
+            };
+
+            const apiKey = "AIzaSyBc9J9aL3qDQsmz36mYG-XUv40h9-7SWHg"; // INSERISCI LA TUA CHIAVE API QUI
 
             const generateImage = async (promptText) => {
                 if (!promptText.trim()) return;
+                if (!apiKey) {
+                    setError("⚠️ Inserisci la tua API key nel codice!");
+                    return;
+                }
+
                 setIsGenerating(true);
                 setError(null);
 
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+
                 try {
-                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`, {
+                    const response = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            instances: { prompt: promptText },
-                            parameters: { sampleCount: 1 }
+                            contents: [{ parts: [{ text: `Genera un'immagine basata su questo prompt: ${promptText}` }] }],
+                            generationConfig: {
+                                responseModalities: ["IMAGE"]
+                            }
                         })
                     });
 
-                    if (!response.ok) throw new Error("Errore nella generazione. Verifica la tua API Key.");
-
                     const data = await response.json();
-                    const base64 = `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+
+                    if (!response.ok) {
+                        throw new Error(data.error?.message || "Errore API. Controlla la tua chiave.");
+                    }
+
+                    const imagePart = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
                     
-                    setGeneratedImage(base64);
-                    setHistory(prev => [{ prompt: promptText, url: base64, id: Date.now() }, ...prev]);
+                    if (imagePart) {
+                        const base64 = `data:image/png;base64,${imagePart.inlineData.data}`;
+                        setGeneratedImage(base64);
+                        setHistory(prev => [{ prompt: promptText, url: base64, id: Date.now() }, ...prev]);
+                        setPrompt(''); // Reset prompt
+                    } else {
+                        throw new Error("Il modello non ha restituito un'immagine. Riprova con un prompt diverso.");
+                    }
                 } catch (err) {
                     setError(err.message);
                 } finally {
                     setIsGenerating(false);
                 }
+            };
+
+            const downloadImage = () => {
+                if (!generatedImage) return;
+                const link = document.createElement('a');
+                link.href = generatedImage;
+                link.download = `nanobanana-${Date.now()}.png`;
+                link.click();
+            };
+
+            const clearHistory = () => {
+                if (confirm('Vuoi cancellare tutta la cronologia?')) {
+                    setHistory([]);
+                    localStorage.removeItem('nanobanana_history');
+                }
+            };
+
+            const deleteHistoryItem = (id, e) => {
+                e.stopPropagation();
+                setHistory(prev => prev.filter(item => item.id !== id));
             };
 
             return (
@@ -77,80 +142,128 @@
                         <header className="mb-10 flex justify-between items-center">
                             <div>
                                 <h1 className="text-4xl font-black mb-1">Studio Nano Banana</h1>
-                                <p className="text-slate-500 dark:text-slate-400 font-medium italic">Creatività dinamica tra luce e ombra</p>
+                                <p className="text-slate-500 dark:text-slate-400 font-medium italic text-sm">Generatore di immagini AI</p>
                             </div>
-                            <div className="hidden md:block bg-yellow-400 p-3 rounded-2xl rotate-3 shadow-lg shadow-yellow-500/20">
-                                <i className="fas fa-moon text-white text-2xl"></i>
+                            <div className="flex gap-3">
+                                <button 
+                                    onClick={toggleDarkMode}
+                                    className="bg-slate-200 dark:bg-slate-800 p-3 rounded-2xl shadow-lg hover:scale-105 transition-transform"
+                                >
+                                    <i className={`fas ${darkMode ? 'fa-sun text-yellow-400' : 'fa-moon text-slate-600'} text-2xl`}></i>
+                                </button>
+                                <div className="bg-yellow-400 p-3 rounded-2xl shadow-lg">
+                                    <i className="fas fa-bolt text-white text-2xl"></i>
+                                </div>
                             </div>
                         </header>
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                             <div className="lg:col-span-2 space-y-8">
-                                <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-3xl shadow-xl dark:shadow-none border border-slate-100 dark:border-slate-800 transition-colors">
-                                    <h3 className="text-xl font-bold mb-4">Cosa vuoi creare?</h3>
+                                <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-800">
                                     <textarea 
-                                        className="w-full h-32 p-4 rounded-2xl border-2 border-slate-100 dark:border-slate-800 bg-transparent focus:border-yellow-400 dark:focus:border-yellow-500 focus:ring-0 outline-none transition-all text-lg"
-                                        placeholder="Descrivi la tua idea..."
+                                        className="w-full h-32 p-4 rounded-2xl border-2 border-slate-100 dark:border-slate-800 bg-transparent focus:border-yellow-400 outline-none transition-all text-lg resize-none"
+                                        placeholder="Descrivi cosa vuoi vedere..."
                                         value={prompt}
                                         onChange={(e) => setPrompt(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && e.ctrlKey) {
+                                                generateImage(prompt);
+                                            }
+                                        }}
                                     />
-                                    <button 
-                                        onClick={() => generateImage(prompt)}
-                                        disabled={isGenerating || !prompt.trim()}
-                                        className="w-full mt-6 bg-yellow-400 hover:bg-yellow-500 text-slate-900 font-black py-4 rounded-2xl text-xl transition-all active:scale-95 disabled:opacity-30 shadow-lg shadow-yellow-400/20"
-                                    >
-                                        {isGenerating ? "GENERAZIONE IN CORSO..." : "GENERA IMMAGINE"}
-                                    </button>
+                                    <div className="flex gap-3 mt-4">
+                                        <button 
+                                            onClick={() => generateImage(prompt)}
+                                            disabled={isGenerating || !prompt.trim()}
+                                            className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-slate-900 font-black py-4 rounded-2xl text-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                        >
+                                            {isGenerating ? (
+                                                <span className="flex items-center justify-center gap-2">
+                                                    <i className="fas fa-spinner fa-spin"></i> CREAZIONE...
+                                                </span>
+                                            ) : "GENERA"}
+                                        </button>
+                                        {generatedImage && (
+                                            <button 
+                                                onClick={downloadImage}
+                                                className="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-2xl transition-all"
+                                            >
+                                                <i className="fas fa-download"></i>
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-2 text-center">Premi Ctrl+Invio per generare velocemente</p>
                                 </div>
 
-                                <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl dark:shadow-none border border-slate-100 dark:border-slate-800 overflow-hidden min-h-[450px] flex items-center justify-center relative">
+                                <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-800 min-h-[450px] flex items-center justify-center overflow-hidden">
                                     {isGenerating ? (
                                         <div className="text-center">
                                             <span className="custom-loader mb-4"></span>
-                                            <p className="text-slate-400 font-bold">L'IA sta elaborando i pixel...</p>
+                                            <p className="text-slate-400 animate-pulse">Sto disegnando la tua immagine...</p>
                                         </div>
                                     ) : error ? (
-                                        <div className="text-center p-10">
-                                            <i className="fas fa-exclamation-circle text-red-500 text-4xl mb-4"></i>
-                                            <p className="text-red-600 font-bold">{error}</p>
+                                        <div className="text-center p-6">
+                                            <i className="fas fa-triangle-exclamation text-red-500 text-4xl mb-4"></i>
+                                            <p className="text-red-500 font-bold">{error}</p>
+                                            <button 
+                                                onClick={() => setError(null)}
+                                                className="mt-4 text-sm text-slate-400 hover:text-slate-600 underline"
+                                            >
+                                                Chiudi
+                                            </button>
                                         </div>
                                     ) : generatedImage ? (
-                                        <div className="group relative w-full h-full">
-                                            <img src={generatedImage} className="w-full h-full object-contain" alt="IA Generated" />
-                                            <a 
-                                                href={generatedImage} 
-                                                download="banana-art.png"
-                                                className="absolute top-4 right-4 bg-white/80 dark:bg-slate-800/80 p-3 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-md"
-                                            >
-                                                <i className="fas fa-download"></i>
-                                            </a>
+                                        <div className="w-full h-full p-4 slide-in">
+                                            <img src={generatedImage} className="w-full h-full object-contain rounded-2xl" alt="AI Generated" />
                                         </div>
                                     ) : (
-                                        <div className="text-center text-slate-200 dark:text-slate-800 p-20">
-                                            <i className="fas fa-wand-sparkles text-8xl mb-6"></i>
-                                            <p className="text-2xl font-bold">Pronto per il prompt</p>
+                                        <div className="text-center text-slate-200 dark:text-slate-800 p-10">
+                                            <i className="fas fa-palette text-8xl mb-4"></i>
+                                            <p className="text-xl font-bold">Il risultato apparirà qui</p>
+                                            <p className="text-sm opacity-50 mt-2">Scrivi un prompt e clicca "Genera"</p>
                                         </div>
                                     )}
                                 </div>
                             </div>
 
-                            <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-3xl shadow-xl dark:shadow-none border border-slate-100 dark:border-slate-800 h-full max-h-[750px] flex flex-col">
-                                <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                                    <i className="fas fa-clock-rotate-left text-slate-400"></i> Cronologia
-                                </h3>
-                                <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-800 h-[600px] flex flex-col">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-bold flex items-center gap-2">
+                                        <i className="fas fa-history"></i> Cronologia ({history.length})
+                                    </h3>
+                                    {history.length > 0 && (
+                                        <button 
+                                            onClick={clearHistory}
+                                            className="text-red-500 hover:text-red-600 text-sm"
+                                        >
+                                            <i className="fas fa-trash"></i>
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="space-y-4 overflow-y-auto custom-scrollbar pr-2 flex-1">
                                     {history.length === 0 ? (
-                                        <p className="text-slate-400 dark:text-slate-600 italic text-center py-10">Cronologia vuota</p>
-                                    ) : (
+                                        <div className="text-slate-400 text-center py-10">
+                                            <i className="fas fa-images text-4xl mb-2 opacity-20"></i>
+                                            <p>Nessuna immagine generata</p>
+                                        </div>
+                                    ) : 
                                         history.map(item => (
-                                            <div key={item.id} className="group relative rounded-2xl overflow-hidden border border-slate-100 dark:border-slate-800 hover:border-yellow-400 transition-all cursor-pointer" onClick={() => setGeneratedImage(item.url)}>
-                                                <img src={item.url} className="w-full h-28 object-cover" />
-                                                <div className="p-3 bg-slate-50 dark:bg-slate-800/50">
-                                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate font-mono uppercase tracking-tighter">{item.prompt}</p>
-                                                </div>
+                                            <div 
+                                                key={item.id} 
+                                                className="rounded-xl overflow-hidden border border-slate-100 dark:border-slate-800 cursor-pointer hover:shadow-lg transition-all group relative"
+                                                onClick={() => setGeneratedImage(item.url)}
+                                            >
+                                                <img src={item.url} className="w-full h-24 object-cover" alt={item.prompt} />
+                                                <p className="text-[10px] p-2 truncate opacity-60 uppercase">{item.prompt}</p>
+                                                <button 
+                                                    onClick={(e) => deleteHistoryItem(item.id, e)}
+                                                    className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                                >
+                                                    <i className="fas fa-times text-xs"></i>
+                                                </button>
                                             </div>
                                         ))
-                                    )}
+                                    }
                                 </div>
                             </div>
                         </div>
@@ -164,4 +277,3 @@
     </script>
 </body>
 </html>
-
